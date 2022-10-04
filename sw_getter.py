@@ -1,4 +1,5 @@
 import asyncio
+from aiohttp.client_exceptions import ContentTypeError
 from aiohttp import ClientSession
 from datetime import datetime as dt
 import more_itertools
@@ -20,7 +21,10 @@ async def get_name(url: str, session: ClientSession, attr: str = 'name') -> str:
     :return: значение атрибута
     """
     async with session.get(url) as response:
-        json = await response.json()
+        try:
+            json = await response.json()
+        except ContentTypeError:
+            return 'Content type error'
         return json[attr]
 
 
@@ -47,7 +51,12 @@ async def get_pers(id_pers: int, session: ClientSession) -> dict:
     :return: словарь с характеристиками персонажа
     """
     async with session.get(f'https://swapi.dev/api/people/{id_pers}') as response:
-        json = await response.json()
+        try:
+            json = await response.json()
+        except ContentTypeError:
+            json = {'error': 'Content type error'}
+        # DEBUG
+        print(json)
         if len(json.keys()) > 1:
             result = dict(json)
             # get homeworld
@@ -68,6 +77,20 @@ async def get_pers(id_pers: int, session: ClientSession) -> dict:
             return result
 
 
+async def insert(data, Model, session_db):
+    """
+    Запись в БД.
+    :param data: Итерируемый набор записей.
+    :param Model: Модель данных (таблица для записи).
+    :param session_db: Сессия БД.
+    :return: None
+    """
+    # Список записей.
+    rows = [Model(row) for row in data if row]
+    # Загрузка в БД.
+    session_db.add_all(rows)
+
+
 async def main():
     # Соединение с БД
     async with engine.begin() as conn:
@@ -83,12 +106,7 @@ async def main():
             for coros_chunk in more_itertools.chunked(coros, CHUNK_SIZE):
                 # Соединение порций запросов и их отправка
                 result = await asyncio.gather(*coros_chunk)
-                # Перебор списка ответов
-                for res in result:
-                    # Если персонаж существует, то вставка его в БД
-                    if res:
-                        session_db.add(Persons(res))
-        # коммит БД
+                await insert(result, Persons, session_db)
         await session_db.commit()
 
 
